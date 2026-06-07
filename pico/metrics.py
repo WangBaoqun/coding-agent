@@ -166,12 +166,13 @@ def _temporary_feature_flags(agent, updates):
     finally:
         agent.feature_flags = previous
 
-
+# 消融实验
 def measure_feature_ablation_metrics(agent, user_message):
+    # 三种实验变体
     variants = {
-        "full": {},
-        "no_context_reduction": {"context_reduction": False},
-        "no_memory": {"memory": False, "relevant_memory": False},
+        "full": {},  # 完整功能
+        "no_context_reduction": {"context_reduction": False},  # 无上下文压缩
+        "no_memory": {"memory": False, "relevant_memory": False},  # 长期记忆系统不生效 （显示 "Memory:\n- disabled"） 相关笔记的检索也不生效 （Relevant memory:- none）
     }
     results = {}
     for name, updates in variants.items():
@@ -750,7 +751,8 @@ def run_provider_experiments(benchmark_path, workspace_root, artifact_root, max_
     workspace_root = Path(workspace_root)
     artifact_root = Path(artifact_root)
     providers = []
-    for provider_name in ("gpt", "claude", "deepseek"):
+    # for provider_name in ("gpt", "claude", "deepseek"):
+    for provider_name in ("gpt", ):
         profile = _provider_profile(provider_name)
         if profile["status"] != "ready":
             providers.append(profile)
@@ -763,7 +765,7 @@ def run_provider_experiments(benchmark_path, workspace_root, artifact_root, max_
                     base_url=profile["base_url"],
                     api_key=profile["api_key"],
                     temperature=0.0,
-                    timeout=300,
+                    timeout=600,
                 )
         else:
             def factory(task, workspace, profile=profile):
@@ -773,7 +775,7 @@ def run_provider_experiments(benchmark_path, workspace_root, artifact_root, max_
                     base_url=profile["base_url"],
                     api_key=profile["api_key"],
                     temperature=0.0,
-                    timeout=300,
+                    timeout=600,
                 )
         artifact_path = artifact_root / f"{provider_name}-benchmark.json"
         try:
@@ -1101,7 +1103,7 @@ def collect_resume_metrics(
             "no_context_reduction": {"prompt_chars": int(round(context["summary"].get("avg_raw_prompt_chars", 0.0)))},
         }
     else:
-        stress = build_stress_agent_metrics()
+        stress = build_stress_agent_metrics()  # 得到三种变体：完整功能、无上下文压缩、无记忆 的对比结果
         memory = run_memory_dependency_experiment(repetitions=memory_repetitions)
         memory_large = run_large_scale_memory_experiment(repetitions=large_memory_repetitions)
         context = run_context_stress_matrix(repetitions=context_repetitions)
