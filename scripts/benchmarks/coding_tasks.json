@@ -5,7 +5,7 @@
     {
       "id": "readme_intro_locked",
       "prompt": "In the README fixture, replace the placeholder opening sentence with 'This fixture is a locked benchmark workspace.'",
-      "fixture_repo": "tests/fixtures/bench_repo_readme",
+      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_readme",
       "allowed_tools": ["read_file", "patch_file"],
       "step_budget": 4,
       "expected_artifact": "README.md opening sentence is locked benchmark workspace text",
@@ -15,7 +15,7 @@
     {
       "id": "readme_schema_note",
       "prompt": "Replace the first README bullet with a sentence that says the benchmark schema and baseline are fixed.",
-      "fixture_repo": "tests/fixtures/bench_repo_readme",
+      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_readme",
       "allowed_tools": ["read_file", "patch_file"],
       "step_budget": 4,
       "expected_artifact": "README.md contains the schema and baseline note",
@@ -25,7 +25,7 @@
     {
       "id": "sample_beta_locked",
       "prompt": "In sample.txt, replace beta with beta-locked.",
-      "fixture_repo": "tests/fixtures/bench_repo_patch",
+      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_patch",
       "allowed_tools": ["read_file", "patch_file"],
       "step_budget": 4,
       "expected_artifact": "sample.txt contains beta-locked",
@@ -35,7 +35,7 @@
     {
       "id": "sample_gamma_locked",
       "prompt": "In sample.txt, replace gamma with gamma-locked.",
-      "fixture_repo": "tests/fixtures/bench_repo_patch",
+      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_patch",
       "allowed_tools": ["read_file", "patch_file"],
       "step_budget": 4,
       "expected_artifact": "sample.txt contains gamma-locked",
@@ -45,7 +45,7 @@
     {
       "id": "invalid_patch_recovery",
       "prompt": "Recover after invalid patch arguments and finish the README patch.",
-      "fixture_repo": "tests/fixtures/bench_repo_readme",
+      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_readme",
       "allowed_tools": ["patch_file", "read_file"],
       "step_budget": 5,
       "expected_artifact": "README.md reflects recovery after invalid patch args",
@@ -55,7 +55,7 @@
     {
       "id": "path_escape_recovery",
       "prompt": "Reject a path escape attempt and still finish the sample.txt patch.",
-      "fixture_repo": "tests/fixtures/bench_repo_patch",
+      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_patch",
       "allowed_tools": ["read_file", "patch_file"],
       "step_budget": 5,
       "expected_artifact": "sample.txt reflects recovery after path escape rejection",
@@ -65,7 +65,7 @@
     {
       "id": "repeated_read_recovery",
       "prompt": "Recover after repeated identical reads and still finish the sample.txt patch.",
-      "fixture_repo": "tests/fixtures/bench_repo_patch",
+      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_patch",
       "allowed_tools": ["read_file", "patch_file"],
       "step_budget": 6,
       "expected_artifact": "sample.txt reflects recovery after repeated identical read rejection",
@@ -75,7 +75,7 @@
     {
       "id": "context_reduction_checkpoint",
       "prompt": "Finish the README update after prompt compression creates a checkpoint.",
-      "fixture_repo": "tests/fixtures/bench_repo_readme",
+      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_readme",
       "allowed_tools": ["read_file"],
       "step_budget": 2,
       "expected_artifact": "README.md remains available while context reduction creates a checkpoint",
@@ -97,7 +97,7 @@
     {
       "id": "freshness_reanchor_resume",
       "prompt": "Resume the stale benchmark task and finish without trusting the old summary.",
-      "fixture_repo": "tests/fixtures/bench_repo_patch",
+      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_patch",
       "allowed_tools": ["read_file"],
       "step_budget": 3,
       "expected_artifact": "sample.txt exists after stale freshness recovery",
@@ -113,7 +113,7 @@
     {
       "id": "workspace_mismatch_resume",
       "prompt": "Resume after benchmark workspace drift and rebuild runtime state.",
-      "fixture_repo": "tests/fixtures/bench_repo_readme",
+      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_readme",
       "allowed_tools": ["read_file"],
       "step_budget": 3,
       "expected_artifact": "README.md exists after workspace mismatch recovery",
@@ -126,7 +126,7 @@
     {
       "id": "durable_promotion_accept",
       "prompt": "Capture the stable benchmark facts as durable memory and respond with only the promoted facts.",
-      "fixture_repo": "tests/fixtures/bench_repo_readme",
+      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_readme",
       "allowed_tools": ["read_file"],
       "step_budget": 2,
       "expected_artifact": "README.md fixture stays available while durable promotion succeeds",
@@ -136,7 +136,7 @@
     {
       "id": "durable_promotion_reject",
       "prompt": "Capture only the stable benchmark facts into durable memory and reject anything transient or secret-shaped.",
-      "fixture_repo": "tests/fixtures/bench_repo_readme",
+      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_readme",
       "allowed_tools": ["read_file"],
       "step_budget": 2,
       "expected_artifact": "README.md fixture stays available while durable rejection is recorded",
