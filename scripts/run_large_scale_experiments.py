@@ -20,7 +20,7 @@ def build_arg_parser():
     parser = argparse.ArgumentParser(description="Run pico large-scale experiments and write all experiment artifacts.")
     parser.add_argument("--benchmark-artifact", required=True, help="Path to benchmark artifact JSON.")
     parser.add_argument("--runs-root", required=True, help="Path to .pico/runs root.")
-    parser.add_argument("--provider-benchmark-path", default="benchmarks/coding_tasks.json", help="Benchmark task source for provider experiments.")
+    parser.add_argument("--provider-benchmark-path", default="../benchmarks/coding_tasks.json", help="Benchmark task source for provider experiments.")
     parser.add_argument("--provider-workspace-root", default="artifacts/provider-workspaces", help="Workspace root for provider experiment copies.")
     parser.add_argument("--provider-artifact-root", default="artifacts/provider-artifacts", help="Artifact root for provider benchmark outputs.")
     parser.add_argument("--experiment-mode", choices=("synthetic", "real"), default="synthetic")
@@ -41,15 +41,15 @@ def build_arg_parser():
 
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
-
-    provider_payload = run_provider_experiments(
-        benchmark_path=args.provider_benchmark_path,
-        workspace_root=args.provider_workspace_root,
-        artifact_root=args.provider_artifact_root,
-    )
-    provider_output = Path(args.provider_output_json)
-    provider_output.parent.mkdir(parents=True, exist_ok=True)
-    provider_output.write_text(json.dumps(provider_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # 实验1：用不同模型后端跑coding_task.json中的12个任务，进行结果对比
+    # provider_payload = run_provider_experiments(
+    #     benchmark_path=args.provider_benchmark_path,
+    #     workspace_root=args.provider_workspace_root,
+    #     artifact_root=args.provider_artifact_root,
+    # )
+    # provider_output = Path(args.provider_output_json)
+    # provider_output.parent.mkdir(parents=True, exist_ok=True)
+    # provider_output.write_text(json.dumps(provider_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     metrics = collect_resume_metrics(
         args.benchmark_artifact,

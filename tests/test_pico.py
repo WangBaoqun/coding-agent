@@ -1624,6 +1624,7 @@ def test_module_execution_help_works():
         [sys.executable, "-m", "pico", "--help"],
         capture_output=True,
         text=True,
+        encoding="utf-8"  # 显式指定编码
     )
 
     assert result.returncode == 0

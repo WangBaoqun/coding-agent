@@ -158,7 +158,7 @@ def test_run_harness_regression_v2_writes_named_artifact(tmp_path):
     artifact_path = tmp_path / "artifacts" / "harness-regression-v2.json"
 
     artifact = run_harness_regression_v2(
-        benchmark_path=Path("benchmarks/coding_tasks.json"),
+        benchmark_path=Path("../benchmarks/coding_tasks.json"),
         artifact_path=artifact_path,
         workspace_root=tmp_path / "workspaces",
     )
