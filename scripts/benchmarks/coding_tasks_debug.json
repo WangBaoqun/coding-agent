@@ -3,14 +3,14 @@
   "description": "Fixed harness regression tasks for Pico benchmark v2. Each run must use a fresh fixture copy and deterministic scripted outputs.",
   "tasks": [
     {
-      "id": "readme_intro_locked",
-      "prompt": "In the README fixture, replace the placeholder opening sentence with 'This fixture is a locked benchmark workspace.'",
-      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_readme",
+      "id": "sample_beta_locked",
+      "prompt": "In sample.txt, replace beta with beta-locked.",
+      "fixture_repo": "D:\\VibeCoding\\pico\\tests\\fixtures\\bench_repo_patch",
       "allowed_tools": ["read_file", "patch_file"],
       "step_budget": 4,
-      "expected_artifact": "README.md opening sentence is locked benchmark workspace text",
-      "verifier": "python -c \"from pathlib import Path; text = Path('README.md').read_text(encoding='utf-8'); assert 'This fixture is a locked benchmark workspace.' in text\"",
-      "category": "documentation"
+      "expected_artifact": "sample.txt contains beta-locked",
+      "verifier": "python -c \"from pathlib import Path; text = Path('sample.txt').read_text(encoding='utf-8'); assert 'beta-locked' in text and '\\nbeta\\n' not in text\"",
+      "category": "text-edit"
     }
   ]
 }
