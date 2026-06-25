@@ -19,7 +19,7 @@ def build_agent(tmp_path, outputs, **kwargs):
         **kwargs,
     )
 
-
+# 验证 prompt 各部分顺序正确：prefix → Memory → Relevant memory → Transcript → Current user request
 def test_context_manager_assembles_sections_in_expected_order(tmp_path):
     agent = build_agent(tmp_path, [])
     agent.memory.append_note("deploy key is red", tags=("deploy",), created_at="2026-04-07T10:00:00+00:00")
@@ -35,7 +35,10 @@ def test_context_manager_assembles_sections_in_expected_order(tmp_path):
     assert prompt.rstrip().endswith("Current user request:\nWhere is the deploy key?")
     assert metadata["section_order"] == ["prefix", "memory", "relevant_memory", "history", "current_request"]
 
-
+# 测试点：
+#   - 超预算时，先裁剪 relevant_memory，再裁剪 history
+#   - 新内容（RECENT-CONTEXT）保留，旧内容（OLD-CONTEXT）可能被裁掉
+#   - 当前请求完整保留
 def test_context_manager_reduces_relevant_memory_before_history_and_preserves_newer_context(tmp_path):
     agent = build_agent(tmp_path, [])
     agent.prefix = "PREFIX " + ("A" * 600)

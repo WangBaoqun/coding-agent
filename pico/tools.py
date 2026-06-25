@@ -13,9 +13,9 @@ from .workspace import IGNORED_PATH_NAMES, clip
 
 BASE_TOOL_SPECS = {
     "list_files": {
-        "schema": {"path": "str='.'"},
-        "risky": False,
-        "description": "List files in the workspace.",
+        "schema": {"path": "str='.'"},  # 让模型知道参数长啥样
+        "risky": False,  # 决定这个工具要不要走审批
+        "description": "List files in the workspace.",  # 决定这个动作怎么被提示给模型
     },
     "read_file": {
         "schema": {"path": "str", "start": "int=1", "end": "int=200"},
@@ -82,13 +82,13 @@ def tool_example(name):
 def validate_tool(agent, name, args):
     args = args or {}
 
-    if name == "list_files":
+    if name == "list_files":  # 目标必须是目录
         path = agent.path(args.get("path", "."))
         if not path.is_dir():
             raise ValueError("path is not a directory")
         return
 
-    if name == "read_file":
+    if name == "read_file":  # 目标必须是文件，行号范围也要合法
         path = agent.path(args["path"])
         if not path.is_file():
             raise ValueError("path is not a file")
@@ -156,7 +156,7 @@ def tool_list_files(agent, args):
     ]
     lines = []
     for entry in entries[:200]:
-        kind = "[D]" if entry.is_dir() else "[F]"
+        kind = "[D]" if entry.is_dir() else "[F]"  # D代表是目录，F代表是文件
         lines.append(f"{kind} {entry.relative_to(agent.root)}")
     return "\n".join(lines) or "(empty)"
 
@@ -187,6 +187,7 @@ def tool_search(agent, args):
             cwd=agent.root,
             capture_output=True,
             text=True,
+            encoding="utf-8"  # 显式指定编码
         )
         return result.stdout.strip() or result.stderr.strip() or "(no matches)"
 
@@ -221,6 +222,7 @@ def tool_run_shell(agent, args):
         # 这里传入的是过滤后的环境变量，而不是直接继承整个父 shell 环境，
         # 目的是减少敏感信息被意外带进命令执行环境的风险。
         env=agent.shell_env(),
+        encoding="utf-8"  # 显式指定编码
     )
     return textwrap.dedent(
         f"""\

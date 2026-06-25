@@ -130,7 +130,7 @@ class Pico:
             self.session.setdefault("memory", memorylib.default_memory_state()),
             workspace_root=self.root,
         )
-        self.session["memory"] = self.memory.to_dict()
+        self.session["memory"] = self.memory.to_dict()  # 让self.session的memory字段和self.memory字段地址相同
         self.tools = self.build_tools()
         self.prefix_state = self.build_prefix()
         self.prefix = self.prefix_state.text
@@ -337,7 +337,7 @@ class Pico:
                 "<final>Done.</final>",
             ]
         )
-        # prefix 可以理解成 agent 的“工作手册”：
+        # prefix 可以理解成 agent 的“工作手册”： 包括系统规则、工具清单(tool_text)、调用示例(example)、工作区摘要
         # 它是谁、工具怎么调用、当前仓库是什么状态，都写在这里。
         text = textwrap.dedent(
             f"""\
@@ -371,11 +371,11 @@ class Pico:
             """
         ).strip()
         return PromptPrefix(
-            text=text,
-            hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
-            workspace_fingerprint=self.workspace.fingerprint(),
-            tool_signature=self.tool_signature(),
-            built_at=now(),
+            text=text,  # 真正写进prompt的稳定前缀文本
+            hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),  # 这份前缀文本的签名
+            workspace_fingerprint=self.workspace.fingerprint(),  # 当前工作区摘要的签名
+            tool_signature=self.tool_signature(),  # 当前工具表面的签名
+            built_at=now(),  # 这份前缀的生成时间
         )
 
     def _apply_prefix_state(self, prefix_state):
@@ -525,8 +525,8 @@ class Pico:
         return metadata
 
     def _build_prompt_and_metadata(self, user_message):
-        refresh = self.refresh_prefix()
-        self.resume_state = self.evaluate_resume_state()
+        refresh = self.refresh_prefix()  # 检查 workspace 是否变化，决定是否重建 prompt prefix
+        self.resume_state = self.evaluate_resume_state()  # 检查 checkpoint 是否有效，判断哪些文件已过期。
         prompt, metadata = self.context_manager.build(user_message)
         # 这里把“这轮 prompt 是怎么拼出来的”连同缓存相关状态一起记下来，
         # 后面 trace/report 才能解释清楚：为什么这一轮 prefix 变了、缓存有没有命中。
@@ -665,12 +665,12 @@ class Pico:
         # 不是所有工具结果都进入工作记忆。
         # 读文件会生成摘要；写文件/patch 会让旧摘要失效，因为它们可能过期了。
         if name in {"read_file", "write_file", "patch_file"}:
-            self.memory.remember_file(canonical_path)
+            self.memory.remember_file(canonical_path)  # 维护一个recent_files列表，告诉agent最近操作过哪些文件
         if name == "read_file":
-            summary = memorylib.summarize_read_result(result)
-            self.memory.set_file_summary(canonical_path, summary)
+            summary = memorylib.summarize_read_result(result)  # 把完整内容压缩成短摘要
+            self.memory.set_file_summary(canonical_path, summary)  # 存储文件摘要到state的file_summaries字段
             self.memory.append_note(summary, tags=(canonical_path,), source=canonical_path)
-        elif name in {"write_file", "patch_file"}:
+        elif name in {"write_file", "patch_file"}:  # 文件被写入/修改后，旧摘要不再准确，强制清除
             self.memory.invalidate_file_summary(canonical_path)
 
     def note_tool(self, name, args, result):
@@ -774,13 +774,13 @@ class Pico:
         这里就是最关键的入口。
         """
         run_started_at = time.monotonic()
-        self.memory.set_task_summary(user_message)
-        self.record({"role": "user", "content": user_message, "created_at": now()})
+        self.memory.set_task_summary(user_message)  # 把user_message写入memory的state的task_summary和task字段
+        self.record({"role": "user", "content": user_message, "created_at": now()})  # 把user_message写入session的history(list类型)
 
         task_state = TaskState.create(run_id=self.new_run_id(), task_id=self.new_task_id(), user_request=user_message)
         task_state.resume_status = self.resume_state.get("status", CHECKPOINT_NONE_STATUS)
         self.current_task_state = task_state
-        self.current_run_dir = self.run_store.start_run(task_state)
+        self.current_run_dir = self.run_store.start_run(task_state)  # 创建本轮run目录，并写出第一版的 task_state.json
         self.emit_trace(
             task_state,
             "run_started",
@@ -788,10 +788,10 @@ class Pico:
                 "task_id": task_state.task_id,
                 "user_request": clip(user_message, 300),
             },
-        )
+        )  # 追加一条trace到trace.jsonl (位于runs目录下)
 
-        tool_steps = 0
-        attempts = 0
+        tool_steps = 0  # 工具调用的次数
+        attempts = 0  # 模型调用轮数
         max_attempts = max(self.max_steps * 3, self.max_steps + 4)
 
         # 这是 agent 的主循环，可以按“感知 -> 决策 -> 行动 -> 记录”来理解：
@@ -802,8 +802,8 @@ class Pico:
         # 然后进入下一轮，直到停机条件满足
         while tool_steps < self.max_steps and attempts < max_attempts:
             attempts += 1
-            task_state.record_attempt()
-            self.run_store.write_task_state(task_state)
+            task_state.record_attempt()  # self.attempts+=1
+            self.run_store.write_task_state(task_state)  # 由于上一步改了attempts字段，所以需要重新写回task_state.json
             prompt_started_at = time.monotonic()
             prompt, prompt_metadata = self._build_prompt_and_metadata(user_message)
             self.emit_trace(
@@ -883,7 +883,7 @@ class Pico:
                 prompt_metadata.update(completion_metadata)
             self.last_completion_metadata = completion_metadata
             self.last_prompt_metadata = prompt_metadata
-            kind, payload = self.parse(raw)
+            kind, payload = self.parse(raw)  # 解析模型输出
             self.emit_trace(
                 task_state,
                 "model_parsed",
@@ -1020,7 +1020,7 @@ class Pico:
         # 工具是否存在 -> 参数是否合法 -> 是否重复调用 -> 是否通过审批
         # -> 真正执行 -> 更新记忆。
         tool = self.tools.get(name)
-        if tool is None:
+        if tool is None:  # 工具是否注册
             self._last_tool_result_metadata = {
                 "tool_status": "rejected",
                 "tool_error_code": "unknown_tool",
@@ -1033,7 +1033,7 @@ class Pico:
             }
             return f"error: unknown tool '{name}'"
         try:
-            self.validate_tool(name, args)
+            self.validate_tool(name, args)  # 校验参数是否合法
         except Exception as exc:
             example = self.tool_example(name)
             message = f"error: invalid arguments for {name}: {exc}"
@@ -1051,7 +1051,7 @@ class Pico:
                 "diff_summary": [],
             }
             return message
-        if self.repeated_tool_call(name, args):
+        if self.repeated_tool_call(name, args):  # 判断是不是连续重复调用
             self._last_tool_result_metadata = {
                 "tool_status": "rejected",
                 "tool_error_code": "repeated_identical_call",
@@ -1063,7 +1063,7 @@ class Pico:
                 "diff_summary": [],
             }
             return f"error: repeated identical tool call for {name}; choose a different tool or return a final answer"
-        if tool["risky"] and not self.approve(name, args):
+        if tool["risky"] and not self.approve(name, args):  # 高风险工具走审批
             self._last_tool_result_metadata = {
                 "tool_status": "rejected",
                 "tool_error_code": "approval_denied",
@@ -1078,7 +1078,7 @@ class Pico:
         before_snapshot = self.capture_workspace_snapshot() if tool["risky"] else {}
         after_snapshot = before_snapshot
         try:
-            result = clip(tool["run"](args))
+            result = clip(tool["run"](args))  # 把工具执行结果裁剪后返回
             after_snapshot = self.capture_workspace_snapshot() if tool["risky"] else before_snapshot
             affected_paths, diff_summary = self.diff_workspace_snapshots(before_snapshot, after_snapshot)
             workspace_changed = bool(affected_paths)
@@ -1093,7 +1093,7 @@ class Pico:
                 elif exit_code != 0:
                     tool_status = "error"
                     tool_error_code = "tool_failed"
-            self.update_memory_after_tool(name, args, result)
+            self.update_memory_after_tool(name, args, result)  # 把少量高价值工具结果沉淀到memory
             self._last_tool_result_metadata = {
                 "tool_status": tool_status,
                 "tool_error_code": tool_error_code,
@@ -1337,8 +1337,8 @@ class Pico:
 
     def path(self, raw_path):
         path = Path(raw_path)
-        path = path if path.is_absolute() else self.root / path
-        resolved = path.resolve()
+        path = path if path.is_absolute() else self.root / path  # 形成绝对路径
+        resolved = path.resolve()  # 解析路径中的所有符号链接（symlinks），并消除 ..（上级目录）和 .（当前目录）等冗余部分
         # 所有文件类工具都被锚定在 workspace root 之下。
         # 这样既能防住 "../" 逃逸，也能防住符号链接解析后跳出仓库。
         if os.path.commonpath([str(self.root), str(resolved)]) != str(self.root):

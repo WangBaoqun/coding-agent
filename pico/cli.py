@@ -222,7 +222,7 @@ def build_agent(args):
     # 先采集工作区快照和加载项目级环境，再整理 secret 名单、模型后端和 session。
     workspace = WorkspaceContext.build(args.cwd)
     load_project_env(workspace.repo_root)
-    configured_secret_names = _configured_secret_names(args)
+    configured_secret_names = _configured_secret_names(args)  #  哪些变量名应该脱敏?比如OPENAI_API_KEY,避免agent看到这些密钥
     store = SessionStore(workspace.repo_root + "/.pico/sessions")
     model = _build_model_client(args)
     session_id = args.resume

@@ -112,6 +112,7 @@ def _git_value(args, fallback="", cwd=None):
             text=True,
             check=True,
             timeout=5,
+            encoding="utf-8"  # 显式指定编码
         )
         return result.stdout.strip() or fallback
     except Exception:
@@ -490,6 +491,7 @@ class BenchmarkEvaluator:
             shell=True,
             capture_output=True,
             text=True,
+            encoding="utf-8"  # 显式指定编码
         )
 
         within_budget = task_state.tool_steps <= int(task["step_budget"])

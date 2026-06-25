@@ -119,7 +119,7 @@ class ContextManager:
         selected_notes = []
         if memory_enabled and relevant_memory_enabled and hasattr(self.agent, "memory") and hasattr(self.agent.memory, "retrieval_candidates"):
             selected_notes = self.agent.memory.retrieval_candidates(user_message, limit=RELEVANT_MEMORY_LIMIT)
-
+        # 如果不允许上下文裁剪
         if not context_reduction_enabled:
             rendered = self._render_sections_without_reduction(section_texts, selected_notes=selected_notes)
             prompt = self._assemble_prompt(rendered)
@@ -135,7 +135,7 @@ class ContextManager:
             return prompt, metadata
 
         budgets = dict(self.section_budgets)
-        rendered = self._render_sections(section_texts, budgets, selected_notes=selected_notes)
+        rendered = self._render_sections(section_texts, budgets, selected_notes=selected_notes)  # 按预算渲染各section
         prompt = self._assemble_prompt(rendered)
         reduction_log = []
 
@@ -148,7 +148,7 @@ class ContextManager:
             reduced = False
             for section in self.reduction_order:
                 floor = int(self.section_floors.get(section, 0))
-                current_budget = int(budgets.get(section, 0))
+                current_budget = int(budgets.get(section, 0))  # 此处取的是字典中预设的值，会导致空转，可以直接取实际长度
                 if current_budget <= floor:
                     continue
                 new_budget = max(floor, current_budget - overflow)
@@ -371,6 +371,7 @@ class ContextManager:
         for index, item in enumerate(history):
             recent = index >= recent_start
             if recent:
+                # 近期6条记录：完整保留
                 line_limit = 900
                 entries.append(
                     {
@@ -379,20 +380,22 @@ class ContextManager:
                     }
                 )
                 continue
-
+            # 如果是读文件的工具调用，则利用memory中的file_summaries字段，并渲染为path->summary
             if item["role"] == "tool" and item["name"] == "read_file":
                 path = str(item["args"].get("path", "")).strip()
+                # 如果重复读取同一文件，则跳过
                 if path in seen_older_reads:
                     details["collapsed_duplicate_reads"] += 1
                     continue
                 seen_older_reads.add(path)
+                # 如果不是重复读取同一文件，但是memory中的file_summaries存在，用摘要代替完整内容
                 summary = self._reusable_file_summary(path)
                 if summary:
                     entries.append({"recent": False, "lines": [f"{path} -> {summary}"]})
                     details["older_entries_count"] += 1
                     details["reused_file_summary_count"] += 1
                     continue
-
+            # 如果是run_shell这种工具调用，转为{command} -> {summary}格式，其他类型的工具调用直接裁剪到最多60
             if item["role"] == "tool":
                 summary_line = self._summarize_old_tool_item(item)
                 entries.append({"recent": False, "lines": [summary_line]})

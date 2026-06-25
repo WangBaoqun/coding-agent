@@ -62,9 +62,16 @@ class DurableMemoryStore:
         self.index_path = self.root / "MEMORY.md"
         self.topics_dir = self.root / "topics"
 
+    # 获取所有话题标识  ["project-alpha", "api-design", ...]
     def topic_slugs(self):
         return [topic["topic"] for topic in self.load_index()]
 
+    # 从 MEMORY.md 文件解析完整的话题索引，返回结构化列表 {
+    #                     "topic": "",
+    #                     "title": "",
+    #                     "summary": "",
+    #                     "tags": [],
+    #                 }
     def load_index(self):
         if not self.index_path.exists():
             return []
@@ -430,7 +437,7 @@ def set_task_summary(state, summary, workspace_root=None):
     state["task"] = state["working"]["task_summary"]
     return state
 
-
+# 记录最近访问的文件
 def remember_file(state, path, workspace_root=None):
     state = normalize_memory_state(state, workspace_root)
     path = canonicalize_path(path, workspace_root).strip()
@@ -461,7 +468,7 @@ def append_note(state, text, tags=(), source="", created_at=None, workspace_root
         "kind": str(kind).strip() or "episodic",
     }
     state["next_note_index"] = note["note_index"] + 1
-
+    # 避免添加相同内容到episodic_notes这个list中，如果内容相同则用新内容覆盖旧内容
     notes = [item for item in state["episodic_notes"] if item["text"] != note["text"]]
     notes.append(note)
     state["episodic_notes"] = notes[-EPISODIC_NOTE_LIMIT:]
@@ -476,7 +483,7 @@ def set_file_summary(state, path, summary, workspace_root=None):
     state["file_summaries"][path] = {
         "summary": summary,
         "created_at": now(),
-        "freshness": file_freshness(path, workspace_root),
+        "freshness": file_freshness(path, workspace_root),  # 对文件内容做hash
     }
     return state
 

@@ -53,7 +53,7 @@ class WorkspaceContext:
 
     @classmethod
     def build(cls, cwd, repo_root_override=None):
-        cwd = Path(cwd).resolve()
+        cwd = Path(cwd).resolve()  # 将工作目录的输入路径转换为绝对路径
 
         def git(args, fallback=""):
             try:
@@ -64,11 +64,12 @@ class WorkspaceContext:
                     text=True,
                     check=True,
                     timeout=5,
+                    encoding="utf-8"  # 显式指定编码
                 )
                 return result.stdout.strip() or fallback
             except Exception:
                 return fallback
-
+        # 确定仓库根目录
         repo_root = (
             Path(repo_root_override).resolve()
             if repo_root_override is not None
@@ -90,12 +91,12 @@ class WorkspaceContext:
         return cls(
             cwd=str(cwd),
             repo_root=str(repo_root),
-            branch=git(["branch", "--show-current"], "-") or "-",
+            branch=git(["branch", "--show-current"], "-") or "-",  # 当前git分支
             default_branch=(
                 lambda branch: branch[len("origin/") :] if branch.startswith("origin/") else branch
             )(git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], "origin/main") or "origin/main"),
             status=clip(git(["status", "--short"], "clean") or "clean", 1500),
-            recent_commits=[line for line in git(["log", "--oneline", "-5"]).splitlines() if line],
+            recent_commits=[line for line in git(["log", "--oneline", "-5"]).splitlines() if line],  # 最近5条commit
             project_docs=docs,
         )
 
