@@ -1,4 +1,6 @@
 # pico
+该项目参考自：https://gitee.com/htxoffical/pico/tree/main
+仅用作学习
 
 `pico` 是一个面向代码仓库的轻量本地 coding agent。它直接跑在终端里，先看当前工作区，再用一组受约束的工具去读文件、改文件、跑命令，并把会话状态保存在本地 `.pico/` 目录里。
 
@@ -18,6 +20,7 @@
 - 模块入口是 `python -m pico`
 - 会话保存在 `.pico/sessions/`
 - 每次运行的工件保存在 `.pico/runs/<run_id>/`
+- 长期记忆文件保存在 `.pico/memory/`，其中MEMORY.md是记忆索引，而`.pico/memory/topics/`下存储的是四种不同类型的记忆文件
 - 支持四类模型后端：
   - Ollama
   - OpenAI 兼容 Responses API
