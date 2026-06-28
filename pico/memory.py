@@ -443,7 +443,7 @@ def remember_file(state, path, workspace_root=None):
     path = canonicalize_path(path, workspace_root).strip()
     if not path:
         return state
-    files = [item for item in state["working"]["recent_files"] if item != path]
+    files = [item for item in state["working"]["recent_files"] if item != path]  # 如果当前文件路径在原来的recent_files中不存在，则添加进去，这是为了去重
     files.append(path)
     state["working"]["recent_files"] = files[-WORKING_FILE_LIMIT:]
     state["files"] = list(state["working"]["recent_files"])
@@ -522,7 +522,7 @@ def summarize_read_result(result, limit=180):
     summary = " | ".join(lines[:3])
     return clip(summary, limit)
 
-
+# 分别从短期记忆的episodic_notes和长期记忆的md文件中检索出top3，再合并为3条(按得分排序 (tag匹配 > 关键词重叠 > 时间戳))
 def retrieval_candidates(state, query, limit=3, workspace_root=None):
     state = normalize_memory_state(state, workspace_root)
     query_tokens = _tokenize(query)
@@ -579,6 +579,7 @@ def render_memory_text(state, workspace_root=None):
     for path in state["working"]["recent_files"][:FILE_SUMMARY_LIMIT]:
         summary = state["file_summaries"].get(path, {})
         current_freshness = file_freshness(path, workspace_root)
+        # 当把文件摘要组装到prompt之前，要重新计算freshness，如果哈希已经变了，则不再显示旧摘要
         if summary.get("summary", "") and summary.get("freshness") == current_freshness:
             summaries.append(f"- {path}: {summary['summary']}")
     if summaries:

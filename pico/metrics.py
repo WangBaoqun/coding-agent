@@ -378,7 +378,7 @@ def _set_irrelevant_memory_for_task(agent):
     agent.memory.state = state
     agent.session["memory"] = agent.memory.to_dict()
 
-
+# 对比 memory_on、memory_off、memory_irrelevant 三种记忆实验的变体
 def _run_memory_task_variant(task, variant):
     with tempfile.TemporaryDirectory(prefix="pico-memory-large-") as temp_dir:
         workspace_root = Path(temp_dir)
@@ -386,10 +386,10 @@ def _run_memory_task_variant(task, variant):
         _write_memory_task_files(workspace_root, task)
         agent = _build_memory_experiment_agent(workspace_root, task["fact"], task["filename"])
         assert agent.ask(_bootstrap_prompt(task)) == "Done."
-        if variant == "memory_off":
+        if variant == "memory_off":  # 由于agent每一轮会重新组装prompt，这里设置为False，会导致prompt中的memory和relevant_memory均为空
             agent.feature_flags["memory"] = False
             agent.feature_flags["relevant_memory"] = False
-        elif variant == "memory_irrelevant":
+        elif variant == "memory_irrelevant":  # 将episodic_notes替换为无关的内容，这样memory和relevant_memory均没有相关的内容
             _set_irrelevant_memory_for_task(agent)
         result = agent.ask(_followup_prompt(task))
         task_state = agent.current_task_state

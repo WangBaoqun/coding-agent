@@ -107,7 +107,7 @@ class ContextManager:
             context_reduction_enabled = self.agent.feature_enabled("context_reduction")
         section_texts = {
             "prefix": str(getattr(self.agent, "prefix", "")),
-            "memory": "Memory:\n- disabled" if not memory_enabled else str(self.agent.memory_text()),
+            "memory": "Memory:\n- disabled" if not memory_enabled else str(self.agent.memory_text()),  # prompt中的memory内容在这里渲染，注意不包括relevant_memory
             "history": "",
             CURRENT_REQUEST_SECTION: f"Current user request:\n{user_message}",
         }
@@ -118,7 +118,7 @@ class ContextManager:
             section_texts["prefix"] = section_texts["prefix"] + "\n\n" + checkpoint_text
         selected_notes = []
         if memory_enabled and relevant_memory_enabled and hasattr(self.agent, "memory") and hasattr(self.agent.memory, "retrieval_candidates"):
-            selected_notes = self.agent.memory.retrieval_candidates(user_message, limit=RELEVANT_MEMORY_LIMIT)
+            selected_notes = self.agent.memory.retrieval_candidates(user_message, limit=RELEVANT_MEMORY_LIMIT)  # relevant_memory的内容是分别从短期记忆的episodic_notes和长期记忆的md文件中检索出top3，再合并为3条
         # 如果不允许上下文裁剪
         if not context_reduction_enabled:
             rendered = self._render_sections_without_reduction(section_texts, selected_notes=selected_notes)

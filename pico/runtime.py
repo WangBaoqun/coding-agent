@@ -698,7 +698,7 @@ class Pico:
         if not text:
             return "empty"
         if REDACTED_VALUE in text or SECRET_SHAPED_TEXT_PATTERN.search(text):
-            return "secret_shaped"
+            return "secret_shaped"  # api、密钥等敏感信息需过滤，不能存入长期记忆
         checkpoint_like_prefixes = (
             "current goal",
             "current blocker",
@@ -715,9 +715,9 @@ class Pico:
             "已排除",
         )
         if any(lowered.startswith(prefix) for prefix in checkpoint_like_prefixes):
-            return "transient_task_state"
+            return "transient_task_state"  # 临时任务状态没有价值，不会存入长期记忆
         if re.search(r"(?i)\b(stdout|stderr|traceback|exit_code)\b", text) or len(text) > 220:
-            return "noisy_output"
+            return "noisy_output"  # 终端报错、控制台输出等噪音和超长文本也不会存入长期记忆
         return ""
 
     def extract_durable_promotions(self, user_message, final_answer):
@@ -942,7 +942,7 @@ class Pico:
             final = (payload or raw).strip()
             self.record({"role": "assistant", "content": final, "created_at": now()})
             task_state.finish_success(final)
-            self.promote_durable_memory(user_message, final)
+            self.promote_durable_memory(user_message, final)  # 长期记忆落盘：将稳定事实(项目约定、关键决策、依赖要求、用户偏好)存到.pico/memory
             checkpoint = self.create_checkpoint(task_state, user_message, trigger="run_finished")
             self.run_store.write_task_state(task_state)
             self.emit_trace(
