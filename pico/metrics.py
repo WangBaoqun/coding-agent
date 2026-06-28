@@ -166,7 +166,7 @@ def _temporary_feature_flags(agent, updates):
     finally:
         agent.feature_flags = previous
 
-# 消融实验
+# 上下文消融实验
 def measure_feature_ablation_metrics(agent, user_message):
     # 三种实验变体
     variants = {
