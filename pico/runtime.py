@@ -216,17 +216,23 @@ class Pico:
         stale_paths = list(invalidated)
         mismatch_fields = []
         if checkpoint:
+            # 第一层：schema版本检查
+            # 对应 schema_mismatch_version 场景：注入的schema_version="legacy-v0"，与当前版本不匹配，直接判定无效。
             if checkpoint.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
                 status = CHECKPOINT_SCHEMA_MISMATCH_STATUS
             else:
+                # 第二层：文件新鲜度检查
+                # 对应 partial_stale_single/multi 场景：_apply_recovery_setup 保存了 freshness 后，故意修改了文件内容（写入了 stale-shifted），导致 expected != current。
                 for item in checkpoint.get("key_files", []):
                     path = str(item.get("path", "")).strip()
                     if not path:
                         continue
-                    expected = item.get("freshness")
-                    current = memorylib.file_freshness(path, self.root)
+                    expected = item.get("freshness")  # checkpoint 里保存的文件哈希
+                    current = memorylib.file_freshness(path, self.root)  # 磁盘上文件的当前哈希
                     if expected != current and path not in stale_paths:
                         stale_paths.append(path)
+                # 第三层：运行环境身份检查
+                # 对应 workspace_mismatch_fingerprint/runtime 场景：注入的 "workspace_fingerprint": "outdated-workspace-fingerprint" 与当前真实指纹不同，触发 mismatch_fields 非空。
                 saved_identity = dict(checkpoint.get("runtime_identity", {}) or self.session.get("runtime_identity", {}) or {})
                 current_identity = self.current_runtime_identity()
                 identity_keys = (
