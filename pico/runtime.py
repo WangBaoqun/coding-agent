@@ -675,7 +675,7 @@ class Pico:
         if name == "read_file":
             summary = memorylib.summarize_read_result(result)  # 把完整内容压缩成短摘要
             self.memory.set_file_summary(canonical_path, summary)  # 存储文件摘要到state的file_summaries字段
-            self.memory.append_note(summary, tags=(canonical_path,), source=canonical_path)
+            self.memory.append_note(summary, tags=(canonical_path,), source=canonical_path)  # 添加过程笔记
         elif name in {"write_file", "patch_file"}:  # 文件被写入/修改后，旧摘要不再准确，强制清除
             self.memory.invalidate_file_summary(canonical_path)
 
@@ -1099,7 +1099,7 @@ class Pico:
                 elif exit_code != 0:
                     tool_status = "error"
                     tool_error_code = "tool_failed"
-            self.update_memory_after_tool(name, args, result)  # 把少量高价值工具结果沉淀到memory
+            self.update_memory_after_tool(name, args, result)  # 把少量高价值工具结果沉淀到 working memory
             self._last_tool_result_metadata = {
                 "tool_status": tool_status,
                 "tool_error_code": tool_error_code,

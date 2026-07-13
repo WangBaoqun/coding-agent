@@ -323,7 +323,7 @@ if __name__ == "__main__":
     #   schema_mismatch_version / schema_mismatch_missing
     #   partial_success_shell / partial_success_tool
 
-    debug_single_scenario("schema_mismatch_missing")
+    debug_single_scenario("workspace_mismatch_fingerprint")
 
     # print("\n\n")
     # debug_all_scenarios_compact()

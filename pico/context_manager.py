@@ -112,7 +112,7 @@ class ContextManager:
             CURRENT_REQUEST_SECTION: f"Current user request:\n{user_message}",
         }
         checkpoint_text = ""
-        if hasattr(self.agent, "render_checkpoint_text"):
+        if hasattr(self.agent, "render_checkpoint_text"):  # 将checkpoint相关内容写入session中
             checkpoint_text = str(self.agent.render_checkpoint_text() or "").strip()
         if checkpoint_text:
             section_texts["prefix"] = section_texts["prefix"] + "\n\n" + checkpoint_text
