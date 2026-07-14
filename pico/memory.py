@@ -554,6 +554,22 @@ def retrieval_candidates(state, query, limit=3, workspace_root=None):
     return [note for _, note in ranked[:limit]]
 
 
+def _stale_label(created_at_str, stale_threshold_days=2):
+    """根据记忆的创建时间计算 stale 警告标签。
+
+    如果记忆距今超过 stale_threshold_days 天，返回 "[STALE: N days ago]" 标签；
+    否则返回空字符串。
+    """
+    created_at = _parse_timestamp(created_at_str)
+    if created_at == 0:
+        return ""
+    now_ts = datetime.now().timestamp()
+    age_days = (now_ts - created_at) / 86400
+    if age_days >= stale_threshold_days:
+        return f"[STALE: {int(age_days)} days ago] "
+    return ""
+
+
 def retrieval_view(state, query, limit=3, workspace_root=None):
     candidates = retrieval_candidates(state, query, limit=limit, workspace_root=workspace_root)
     lines = ["Relevant memory:"]
@@ -561,7 +577,8 @@ def retrieval_view(state, query, limit=3, workspace_root=None):
         lines.append("- none")
         return "\n".join(lines)
     for note in candidates:
-        lines.append(f"- {note['text']}")
+        stale_label = _stale_label(note.get("created_at", ""))
+        lines.append(f"- {stale_label}{note['text']}")
     return "\n".join(lines)
 
 
