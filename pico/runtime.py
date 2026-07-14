@@ -39,6 +39,28 @@ CHECKPOINT_WORKSPACE_MISMATCH_STATUS = "workspace-mismatch"
 CHECKPOINT_SCHEMA_MISMATCH_STATUS = "schema-mismatch"
 DURABLE_MEMORY_INTENT_PATTERN = re.compile(r"(?i)\b(capture|remember|save|store|persist|note)\b")
 DURABLE_MEMORY_INTENT_ZH_PATTERN = re.compile(r"(记住|保存|记录|沉淀|长期记忆|持久记忆)")
+
+# 方案一：基于关键词的分类（替代固定前缀）
+CATEGORY_KEYWORDS = {
+    "project-conventions": {
+        "en": ["convention", "standard", "rule", "guideline", "style guide", "lint", "format", "code style", "check"],
+        "zh": ["约定", "规范", "规则", "标准", "风格", "格式", "代码规范", "代码", "检查"],
+    },
+    "key-decisions": {
+        "en": ["decide", "decision", "choose", "select", "adopt", "going to use", "will use"],
+        "zh": ["决策", "决定", "选择", "采用", "确定"],
+    },
+    "dependency-facts": {
+        "en": ["depend", "require", "version", "library", "package", "install", "dependency"],
+        "zh": ["依赖", "需要", "版本", "库", "包", "安装"],
+    },
+    "user-preferences": {
+        "en": ["prefer", "like", "want", "favorite", "usual", "i like", "i prefer"],
+        "zh": ["偏好", "喜欢", "想要", "习惯", "通常", "偏好"],
+    },
+}
+
+# 保留旧的固定前缀模式作为备选（向后兼容）
 DURABLE_MEMORY_LINE_PATTERNS = (
     ("project-conventions", re.compile(r"(?i)^Project convention:\s*(.+)$")),
     ("key-decisions", re.compile(r"(?i)^Decision:\s*(.+)$")),
@@ -50,6 +72,34 @@ DURABLE_MEMORY_LINE_PATTERNS = (
     ("user-preferences", re.compile(r"^偏好：\s*(.+)$")),
 )
 SECRET_SHAPED_TEXT_PATTERN = re.compile(r"(?i)(\b(api[_ -]?key|token|secret|password)\b|sk-[A-Za-z0-9_-]{6,})")
+
+
+def classify_memory_item(text: str) -> str:
+    """基于关键词判断内容属于哪个记忆类别。
+
+    输入：待分类的文本
+    输出：类别名称（"project-conventions" / "key-decisions" / "dependency-facts" / "user-preferences"）
+          如果没有匹配的关键词，返回 "unknown"
+    """
+    text_lower = text.lower()
+    scores = {}
+
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        score = 0
+        # 英文关键词匹配
+        for kw in keywords.get("en", []):
+            if kw.lower() in text_lower:
+                score += 1
+        # 中文关键词匹配
+        for kw in keywords.get("zh", []):
+            if kw in text:
+                score += 1
+        scores[category] = score
+
+    # 返回得分最高的类别，如果所有类别都是 0 分，返回 "unknown"
+    if not scores or max(scores.values()) == 0:
+        return "unknown"
+    return max(scores, key=scores.get)
 
 
 @dataclass
@@ -727,27 +777,73 @@ class Pico:
         return ""
 
     def extract_durable_promotions(self, user_message, final_answer):
+        """从模型的最终回答中提取值得长期记忆的内容。
+
+        提取策略（双重机制）：
+        1. 优先匹配固定前缀（向后兼容 benchmark）
+        2. 如果没有固定前缀，使用关键词分类
+
+        输入：
+        - user_message: 用户消息（需要包含"记住"等意图关键词）
+        - final_answer: 模型的最终回答
+
+        输出：
+        - promotions: [(category, content), ...] 通过过滤的记忆项
+        - rejections: ["category:reason", ...] 被拒绝的项
+        """
         user_text = str(user_message or "")
+        # 第一步：检查用户是否有记忆意图
         if not (DURABLE_MEMORY_INTENT_PATTERN.search(user_text) or DURABLE_MEMORY_INTENT_ZH_PATTERN.search(user_text)):
             return [], []
+
         promotions = []
         rejections = []
-        for line in str(final_answer or "").splitlines():
+        processed_indices = set()  # 避免重复处理（用行索引）
+
+        lines = str(final_answer or "").splitlines()
+
+        # 第二步：优先匹配固定前缀（向后兼容）
+        for idx, line in enumerate(lines):
             text = line.strip()
             if not text or REDACTED_VALUE in text:
                 continue
+
             for topic, pattern in DURABLE_MEMORY_LINE_PATTERNS:
                 match = pattern.match(text)
                 if not match:
                     continue
                 note_text = match.group(1).strip()
                 if note_text:
+                    processed_indices.add(idx)
                     reason = self.reject_durable_reason(note_text)
                     if reason:
                         rejections.append(f"{topic}:{reason}")
-                        break
-                    promotions.append((topic, note_text))
+                    else:
+                        promotions.append((topic, note_text))
                 break
+
+        # 第三步：对未匹配固定前缀的行，使用关键词分类
+        for idx, line in enumerate(lines):
+            if idx in processed_indices:
+                continue
+
+            text = line.strip()
+            if not text or len(text) < 10:  # 太短的行跳过
+                continue
+            if REDACTED_VALUE in text:
+                continue
+
+            # 使用关键词分类
+            category = classify_memory_item(text)
+            if category == "unknown":
+                continue  # 没有匹配到任何类别，跳过
+
+            reason = self.reject_durable_reason(text)
+            if reason:
+                rejections.append(f"{category}:{reason}")
+            else:
+                promotions.append((category, text))
+
         return promotions, rejections
 
     def promote_durable_memory(self, user_message, final_answer):
