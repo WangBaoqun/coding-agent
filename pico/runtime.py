@@ -11,6 +11,8 @@ import textwrap
 import uuid
 import hashlib
 import time
+import threading
+import queue
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -123,7 +125,7 @@ class SessionStore:
 
     def save(self, session):
         path = self.path(session["id"])
-        path.write_text(json.dumps(session, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(session, indent=2, ensure_ascii=False), encoding="utf-8")
         return path
 
     def load(self, session_id):
@@ -199,6 +201,83 @@ class Pico:
             "workspace_changed": False,
             "prefix_changed": False,
         }
+        self.steering_queue = queue.Queue(maxsize=10)
+        self._steering_input_thread = None  # 没有线程在运行（初始状态，或线程已被清理）
+        self._steering_enabled = False
+
+    def _start_steering_input_thread(self):
+        if not self._steering_enabled or self._steering_input_thread is not None:
+            return
+
+        def _read_loop():
+            while True:
+                try:
+                    text = input()  # 阻塞等待用户输入
+                    if text.strip():
+                        try:
+                            self.steering_queue.put_nowait({
+                                "text": text.strip(),
+                                "arrived_at": time.time()
+                            })  # 非阻塞添加到队列，如果队列满，立即抛出 queue.Full
+                            self.emit_trace(
+                                self.current_task_state,
+                                "steering_arrived",
+                                {"content_preview": text.strip()[:50], "queue_size": self.steering_queue.qsize()},
+                            )  # 添加"steering_arrived"事件到trace中
+                        except queue.Full:
+                            # 队列满，丢弃最早的指令
+                            try:
+                                self.steering_queue.get_nowait()
+                            except queue.Empty:
+                                pass
+                            self.steering_queue.put_nowait({
+                                "text": text.strip(),
+                                "arrived_at": time.time()
+                            })
+                except EOFError:
+                    break
+
+        self._steering_input_thread = threading.Thread(target=_read_loop, daemon=True)  # daemon=True 表示这是守护线程（主进程退出时自动清理）
+        self._steering_input_thread.start()
+
+    def _stop_steering_input_thread(self):
+        """停止输入线程并清空队列"""
+        if self._steering_input_thread is not None:
+            # 清空队列中未处理的 steering
+            while not self.steering_queue.empty():
+                try:
+                    self.steering_queue.get_nowait()
+                except queue.Empty:
+                    break
+            self._steering_input_thread = None
+
+    def _consume_steering(self):
+        """从队列中取出一条 steering 并注入到 history。返回是否消费了 steering。"""
+        if not self._steering_enabled:
+            return False
+
+        try:
+            steering = self.steering_queue.get_nowait()
+            text = steering["text"]
+            arrived_at = steering["arrived_at"]
+
+            # 注入到history
+            self.record({"role": "user", "content": f"[steering] {text}", "created_at": now()})
+
+            # 记录到trace
+            self.emit_trace(
+                self.current_task_state,
+                "steering_consumed",
+                {
+                    "content_preview": text[:50],
+                    "delay_seconds": time.time() - arrived_at,  # 计算steering从到达到被消费的延迟时间
+                    "queue_remaining": self.steering_queue.qsize()
+                }
+            )
+            return True
+        except queue.Empty:
+            return False  # 队列为空，无 steering可消费
+
 
     @classmethod
     def from_session(cls, model_client, workspace, session_store, session_id, **kwargs):
@@ -416,6 +495,9 @@ class Pico:
             - New files should be complete and runnable, including obvious imports.
             - Do not repeat the same tool call with the same arguments if it did not help. Choose a different tool or return a final answer.
             - Required tool arguments must not be empty. Do not call read_file, write_file, patch_file, run_shell, or delegate with args={{}}.
+            - When you see a message starting with `[steering]`, treat it as an urgent user instruction that takes priority.
+            - After receiving `[steering]`, you MUST continue executing the task with tools. Do NOT return a `<final>` answer describing what you plan to do - actually call the tools to do it.
+            - Only return `<final>` when the entire task is truly complete, not when you are describing next steps.
 
             Tools:
             {tool_text}
@@ -896,163 +978,213 @@ class Pico:
         attempts = 0  # 模型调用轮数
         max_attempts = max(self.max_steps * 3, self.max_steps + 4)
 
+        # 启动 steering 输入线程
+        self._start_steering_input_thread()
+
         # 这是 agent 的主循环，可以按“感知 -> 决策 -> 行动 -> 记录”来理解：
         # 1. 感知：重新组 prompt，把当前状态整理给模型看
         # 2. 决策：让模型返回一个工具调用，或一个最终答案
         # 3. 行动：如果是工具调用，就执行工具
         # 4. 记录：把结果写回 history / task_state / trace / memory
         # 然后进入下一轮，直到停机条件满足
-        while tool_steps < self.max_steps and attempts < max_attempts:
-            attempts += 1
-            task_state.record_attempt()  # self.attempts+=1
-            self.run_store.write_task_state(task_state)  # 由于上一步改了attempts字段，所以需要重新写回task_state.json
-            prompt_started_at = time.monotonic()
-            prompt, prompt_metadata = self._build_prompt_and_metadata(user_message)
-            self.emit_trace(
-                task_state,
-                "prompt_built",
-                {
-                    "prompt_metadata": prompt_metadata,
-                    "duration_ms": int((time.monotonic() - prompt_started_at) * 1000),
-                },
-            )
-            if prompt_metadata.get("resume_status") == CHECKPOINT_PARTIAL_STALE_STATUS:
-                checkpoint = self.create_checkpoint(task_state, user_message, trigger="freshness_mismatch")
-                self.run_store.write_task_state(task_state)
-                self.emit_trace(
-                    task_state,
-                    "checkpoint_created",
-                    {
-                        "checkpoint_id": checkpoint["checkpoint_id"],
-                        "trigger": "freshness_mismatch",
-                    },
-                )
-            elif prompt_metadata.get("resume_status") == CHECKPOINT_WORKSPACE_MISMATCH_STATUS:
-                self.emit_trace(
-                    task_state,
-                    "runtime_identity_mismatch",
-                    {
-                        "fields": list(prompt_metadata.get("runtime_identity_mismatch_fields", [])),
-                    },
-                )
-                checkpoint = self.create_checkpoint(task_state, user_message, trigger="workspace_mismatch")
-                self.run_store.write_task_state(task_state)
-                self.emit_trace(
-                    task_state,
-                    "checkpoint_created",
-                    {
-                        "checkpoint_id": checkpoint["checkpoint_id"],
-                        "trigger": "workspace_mismatch",
-                    },
-                )
-            if prompt_metadata.get("budget_reductions"):
-                checkpoint = self.create_checkpoint(task_state, user_message, trigger="context_reduction")
-                self.run_store.write_task_state(task_state)
-                self.emit_trace(
-                    task_state,
-                    "checkpoint_created",
-                    {
-                        "checkpoint_id": checkpoint["checkpoint_id"],
-                        "trigger": "context_reduction",
-                    },
-                )
-            self.emit_trace(
-                task_state,
-                "model_requested",
-                {
-                    "attempts": task_state.attempts,
-                    "tool_steps": task_state.tool_steps,
-                    "prompt_cache_key": prompt_metadata.get("prompt_cache_key"),
-                },
-            )
-            prompt_cache_key = None
-            prompt_cache_retention = None
-            if getattr(self.model_client, "supports_prompt_cache", False):
-                # 只有后端明确支持时，才把稳定前缀的 hash 作为 cache key 发出去。
-                prompt_cache_key = prompt_metadata.get("prompt_cache_key")
-                prompt_cache_retention = "in_memory"
-            model_started_at = time.monotonic()
-            raw = self.model_client.complete(
-                prompt,
-                self.max_new_tokens,
-                prompt_cache_key=prompt_cache_key,
-                prompt_cache_retention=prompt_cache_retention,
-            )
-            completion_metadata = dict(getattr(self.model_client, "last_completion_metadata", {}) or {})
-            if completion_metadata:
-                # 把后端返回的 usage/cache 统计并回 prompt_metadata，
-                # 方便统一写入 report 和 trace。
-                prompt_metadata.update(completion_metadata)
-            self.last_completion_metadata = completion_metadata
-            self.last_prompt_metadata = prompt_metadata
-            kind, payload = self.parse(raw)  # 解析模型输出
-            self.emit_trace(
-                task_state,
-                "model_parsed",
-                {
-                    "kind": kind,
-                    "completion_metadata": completion_metadata,
-                    "duration_ms": int((time.monotonic() - model_started_at) * 1000),
-                },
-            )
+        try:
+            while tool_steps < self.max_steps and attempts < max_attempts:
+                # 检查点 1：循环开头（prompt构建前）
+                self._consume_steering()
 
-            if kind == "tool":
-                tool_steps += 1
-                name = payload.get("name", "")
-                args = payload.get("args", {})
-                task_state.record_tool(name)
-                tool_started_at = time.monotonic()
-                result = self.run_tool(name, args)
-                self.record(
-                    {
-                        "role": "tool",
-                        "name": name,
-                        "args": args,
-                        "content": result,
-                        "created_at": now(),
-                    }
-                )
-                self.run_store.write_task_state(task_state)
+                attempts += 1
+                task_state.record_attempt()  # self.attempts+=1
+                self.run_store.write_task_state(task_state)  # 由于上一步改了attempts字段，所以需要重新写回task_state.json
+                prompt_started_at = time.monotonic()
+                prompt, prompt_metadata = self._build_prompt_and_metadata(user_message)
                 self.emit_trace(
                     task_state,
-                    "tool_executed",
+                    "prompt_built",
                     {
-                        "name": name,
-                        "args": args,
-                        "result": clip(result, 500),
-                        "duration_ms": int((time.monotonic() - tool_started_at) * 1000),
-                        **dict(self._last_tool_result_metadata or {}),
+                        "prompt_metadata": prompt_metadata,
+                        "duration_ms": int((time.monotonic() - prompt_started_at) * 1000),
                     },
                 )
-                checkpoint = self.create_checkpoint(task_state, user_message, trigger="tool_executed")
+                if prompt_metadata.get("resume_status") == CHECKPOINT_PARTIAL_STALE_STATUS:
+                    checkpoint = self.create_checkpoint(task_state, user_message, trigger="freshness_mismatch")
+                    self.run_store.write_task_state(task_state)
+                    self.emit_trace(
+                        task_state,
+                        "checkpoint_created",
+                        {
+                            "checkpoint_id": checkpoint["checkpoint_id"],
+                            "trigger": "freshness_mismatch",
+                        },
+                    )
+                elif prompt_metadata.get("resume_status") == CHECKPOINT_WORKSPACE_MISMATCH_STATUS:
+                    self.emit_trace(
+                        task_state,
+                        "runtime_identity_mismatch",
+                        {
+                            "fields": list(prompt_metadata.get("runtime_identity_mismatch_fields", [])),
+                        },
+                    )
+                    checkpoint = self.create_checkpoint(task_state, user_message, trigger="workspace_mismatch")
+                    self.run_store.write_task_state(task_state)
+                    self.emit_trace(
+                        task_state,
+                        "checkpoint_created",
+                        {
+                            "checkpoint_id": checkpoint["checkpoint_id"],
+                            "trigger": "workspace_mismatch",
+                        },
+                    )
+                if prompt_metadata.get("budget_reductions"):
+                    checkpoint = self.create_checkpoint(task_state, user_message, trigger="context_reduction")
+                    self.run_store.write_task_state(task_state)
+                    self.emit_trace(
+                        task_state,
+                        "checkpoint_created",
+                        {
+                            "checkpoint_id": checkpoint["checkpoint_id"],
+                            "trigger": "context_reduction",
+                        },
+                    )
+                self.emit_trace(
+                    task_state,
+                    "model_requested",
+                    {
+                        "attempts": task_state.attempts,
+                        "tool_steps": task_state.tool_steps,
+                        "prompt_cache_key": prompt_metadata.get("prompt_cache_key"),
+                    },
+                )
+                prompt_cache_key = None
+                prompt_cache_retention = None
+                if getattr(self.model_client, "supports_prompt_cache", False):
+                    # 只有后端明确支持时，才把稳定前缀的 hash 作为 cache key 发出去。
+                    prompt_cache_key = prompt_metadata.get("prompt_cache_key")
+                    prompt_cache_retention = "in_memory"
+                model_started_at = time.monotonic()
+                raw = self.model_client.complete(
+                    prompt,
+                    self.max_new_tokens,
+                    prompt_cache_key=prompt_cache_key,
+                    prompt_cache_retention=prompt_cache_retention,
+                )
+                completion_metadata = dict(getattr(self.model_client, "last_completion_metadata", {}) or {})
+                if completion_metadata:
+                    # 把后端返回的 usage/cache 统计并回 prompt_metadata，
+                    # 方便统一写入 report 和 trace。
+                    prompt_metadata.update(completion_metadata)
+                self.last_completion_metadata = completion_metadata
+                self.last_prompt_metadata = prompt_metadata
+                kind, payload = self.parse(raw)  # 解析模型输出
+                self.emit_trace(
+                    task_state,
+                    "model_parsed",
+                    {
+                        "kind": kind,
+                        "completion_metadata": completion_metadata,
+                        "duration_ms": int((time.monotonic() - model_started_at) * 1000),
+                    },
+                )
+
+                if kind == "tool":
+                    tool_steps += 1
+                    name = payload.get("name", "")
+                    args = payload.get("args", {})
+                    task_state.record_tool(name)
+                    tool_started_at = time.monotonic()
+                    result = self.run_tool(name, args)
+                    self.record(
+                        {
+                            "role": "tool",
+                            "name": name,
+                            "args": args,
+                            "content": result,
+                            "created_at": now(),
+                        }
+                    )
+                    self.run_store.write_task_state(task_state)
+                    self.emit_trace(
+                        task_state,
+                        "tool_executed",
+                        {
+                            "name": name,
+                            "args": args,
+                            "result": clip(result, 500),
+                            "duration_ms": int((time.monotonic() - tool_started_at) * 1000),
+                            **dict(self._last_tool_result_metadata or {}),
+                        },
+                    )
+                    checkpoint = self.create_checkpoint(task_state, user_message, trigger="tool_executed")
+                    self.run_store.write_task_state(task_state)
+                    self.emit_trace(
+                        task_state,
+                        "checkpoint_created",
+                        {
+                            "checkpoint_id": checkpoint["checkpoint_id"],
+                            "trigger": "tool_executed",
+                        },
+                    )
+                    # 检查点2：循环结尾（工具执行完毕后）
+                    self._consume_steering()
+                    continue
+
+                if kind == "retry":
+                    self.record({"role": "assistant", "content": payload, "created_at": now()})
+                    self.run_store.write_task_state(task_state)
+                    continue
+
+                # 检查点3：模型返回 final 前，消费可能到达的 steering
+                consumed = self._consume_steering()
+
+                # 如果消费了 steering，继续循环让模型看到 steering
+                # 而不是直接返回 final
+                if consumed:
+                    # 记录模型的 final 响应到 history（但不退出）
+                    self.record({"role": "assistant", "content": (payload or raw).strip(), "created_at": now()})
+                    continue  # 继续循环，下一轮会构建包含 steering 的新 prompt
+
+                final = (payload or raw).strip()
+                self.record({"role": "assistant", "content": final, "created_at": now()})
+                task_state.finish_success(final)
+                self.promote_durable_memory(user_message, final)  # 长期记忆落盘：将稳定事实(项目约定、关键决策、依赖要求、用户偏好)存到.pico/memory
+                checkpoint = self.create_checkpoint(task_state, user_message, trigger="run_finished")
                 self.run_store.write_task_state(task_state)
                 self.emit_trace(
                     task_state,
                     "checkpoint_created",
                     {
                         "checkpoint_id": checkpoint["checkpoint_id"],
-                        "trigger": "tool_executed",
+                        "trigger": "run_finished",
                     },
                 )
-                continue
+                self.emit_trace(
+                    task_state,
+                    "run_finished",
+                    {
+                        "status": task_state.status,
+                        "stop_reason": task_state.stop_reason,
+                        "final_answer": final,
+                        "run_duration_ms": int((time.monotonic() - run_started_at) * 1000),
+                    },
+                )
+                self.run_store.write_report(task_state, self.redact_artifact(self.build_report(task_state)))
+                return final
 
-            if kind == "retry":
-                self.record({"role": "assistant", "content": payload, "created_at": now()})
-                self.run_store.write_task_state(task_state)
-                continue
-
-            final = (payload or raw).strip()
+            if attempts >= max_attempts and tool_steps < self.max_steps:
+                final = "Stopped after too many malformed model responses without a valid tool call or final answer."
+                task_state.stop_retry_limit(final)
+            else:
+                final = "Stopped after reaching the step limit without a final answer."
+                task_state.stop_step_limit(final)
             self.record({"role": "assistant", "content": final, "created_at": now()})
-            task_state.finish_success(final)
-            self.promote_durable_memory(user_message, final)  # 长期记忆落盘：将稳定事实(项目约定、关键决策、依赖要求、用户偏好)存到.pico/memory
-            checkpoint = self.create_checkpoint(task_state, user_message, trigger="run_finished")
+            self.promote_durable_memory(user_message, final)
             self.run_store.write_task_state(task_state)
+            checkpoint = self.create_checkpoint(task_state, user_message, trigger=task_state.stop_reason or "run_stopped")
             self.emit_trace(
                 task_state,
                 "checkpoint_created",
                 {
                     "checkpoint_id": checkpoint["checkpoint_id"],
-                    "trigger": "run_finished",
+                    "trigger": task_state.stop_reason or "run_stopped",
                 },
             )
             self.emit_trace(
@@ -1067,37 +1199,8 @@ class Pico:
             )
             self.run_store.write_report(task_state, self.redact_artifact(self.build_report(task_state)))
             return final
-
-        if attempts >= max_attempts and tool_steps < self.max_steps:
-            final = "Stopped after too many malformed model responses without a valid tool call or final answer."
-            task_state.stop_retry_limit(final)
-        else:
-            final = "Stopped after reaching the step limit without a final answer."
-            task_state.stop_step_limit(final)
-        self.record({"role": "assistant", "content": final, "created_at": now()})
-        self.promote_durable_memory(user_message, final)
-        self.run_store.write_task_state(task_state)
-        checkpoint = self.create_checkpoint(task_state, user_message, trigger=task_state.stop_reason or "run_stopped")
-        self.emit_trace(
-            task_state,
-            "checkpoint_created",
-            {
-                "checkpoint_id": checkpoint["checkpoint_id"],
-                "trigger": task_state.stop_reason or "run_stopped",
-            },
-        )
-        self.emit_trace(
-            task_state,
-            "run_finished",
-            {
-                "status": task_state.status,
-                "stop_reason": task_state.stop_reason,
-                "final_answer": final,
-                "run_duration_ms": int((time.monotonic() - run_started_at) * 1000),
-            },
-        )
-        self.run_store.write_report(task_state, self.redact_artifact(self.build_report(task_state)))
-        return final
+        finally:
+            self._stop_steering_input_thread()
 
     def run_tool(self, name, args):
         """执行一次工具调用，并在执行前后套上完整护栏。
@@ -1359,7 +1462,8 @@ class Pico:
             return "retry", Pico.retry_notice("model returned an empty <final> answer")
         raw = raw.strip()
         if raw:
-            return "final", raw
+            # 如果模型输出是普通文本（没有 <final> 标签），要求它使用正确格式
+            return "retry", Pico.retry_notice("model output must be wrapped in <final>...</final> tags")
         return "retry", Pico.retry_notice("model returned an empty response")
 
     @staticmethod
