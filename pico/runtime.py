@@ -157,7 +157,7 @@ class Pico:
         session=None,
         run_store=None,
         approval_policy="ask",
-        max_steps=6,
+        max_steps=8,
         max_new_tokens=512,
         depth=0,
         max_depth=1,

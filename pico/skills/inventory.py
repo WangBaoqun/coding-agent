@@ -58,23 +58,42 @@ class SkillsInventory:
         """
         生成清单文本（用于 prompt 注入）
 
+        采用 Pi 的设计风格：使用 XML 标签展示技能信息，
+        引导模型在任务匹配时自主使用 read_file 工具加载技能。
+
         返回:
             str: 清单文本
 
         格式示例:
-            Available Skills (use /skill:name to invoke):
-            - hello: A simple greeting skill | /skill:hello
-            - code-review: Review code for bugs | /skill:code-review
+            <available_skills>
+            IMPORTANT: When you read a skill file, you MUST follow ALL instructions in it,
+            including running any helper scripts mentioned. Do not skip required steps.
+
+            <skill>
+              <name>hello</name>
+              <description>A simple greeting skill</description>
+              <location>.pico/skills/hello/SKILL.md</location>
+            </skill>
+            </available_skills>
         """
         if not self.skills:
             return ""
 
-        # 使用列表和 join() 更高效
-        lines = ["Available Skills (use /skill:name to invoke):"]
-        for skill in self.skills:
-            # 使用 f-string 更简洁
-            lines.append(f"- {skill.name}: {skill.description} | /skill:{skill.name}")
+        lines = [
+            "<available_skills>",
+            "IMPORTANT: When you read a skill file, you MUST follow ALL instructions in it,",
+            "including running any helper scripts mentioned. Do not skip required steps.",
+            "",
+        ]
 
+        for skill in self.skills:
+            lines.append("<skill>")
+            lines.append(f"  <name>{skill.name}</name>")
+            lines.append(f"  <description>{skill.description}</description>")
+            lines.append(f"  <location>{skill.file_path}</location>")
+            lines.append("</skill>")
+
+        lines.append("</available_skills>")
         return "\n".join(lines)
 
     def filter_by_category(self, category: str) -> 'SkillsInventory':

@@ -31,7 +31,7 @@ def load_skills(skills_dir: str = ".pico/skills") -> List[Skill]:
 
     支持两种 skill 组织方式：
     1. 单文件模式：skill 是一个 .md 文件（如 hello.md）
-    2. 目录模式：skill 是一个目录，包含 skill.md 或 <dir-name>.md（如 code-review/skill.md）
+    2. 目录模式：skill 是一个目录，包含 SKILL.md 或 <dir-name>.md（如 code-review/SKILL.md）
 
     参数:
         skills_dir: 技能目录路径（默认 ".pico/skills"）
@@ -89,15 +89,15 @@ def load_skills(skills_dir: str = ".pico/skills") -> List[Skill]:
     # 3.2 解析目录形式的 skill
     for subdir in subdirs:
         try:
-            # 尝试查找 skill.md 或 <dir-name>.md
+            # 尝试查找 SKILL.md 或 <dir-name>.md
             skill_file = None
-            if (subdir / "skill.md").exists():
-                skill_file = subdir / "skill.md"
+            if (subdir / "SKILL.md").exists():
+                skill_file = subdir / "SKILL.md"
             elif (subdir / f"{subdir.name}.md").exists():
                 skill_file = subdir / f"{subdir.name}.md"
 
             if skill_file is None:
-                logger.debug(f"跳过目录 {subdir}: 未找到 skill.md 或 {subdir.name}.md")
+                logger.debug(f"跳过目录 {subdir}: 未找到 SKILL.md 或 {subdir.name}.md")
                 continue
 
             # 解析 skill，传入 subdir 作为 base_dir
