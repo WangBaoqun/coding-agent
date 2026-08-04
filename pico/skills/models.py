@@ -65,6 +65,7 @@ class Skill:
         content_type: 内容类型（prompt_only, code_only, hybrid）
         code_blocks: 提取的代码块列表
         file_path: 技能文件的完整路径
+        base_dir: 技能文件所在目录（用于解析相对路径的辅助脚本）
 
     内容类型说明:
         - prompt_only: 仅包含 Prompt 指令，无代码块
@@ -80,7 +81,8 @@ class Skill:
             content="# Hello\\nSay hello to {name}",
             content_type="prompt_only",
             code_blocks=[],
-            file_path=".pico/skills/hello.md"
+            file_path=".pico/skills/hello.md",
+            base_dir=".pico/skills"
         )
     """
     name: str
@@ -91,3 +93,4 @@ class Skill:
     content_type: str = "prompt_only"  # 默认类型
     code_blocks: List[CodeBlock] = field(default_factory=list)
     file_path: str = ""  # 文件路径
+    base_dir: str = ""  # 技能文件所在目录（用于解析辅助脚本的相对路径）

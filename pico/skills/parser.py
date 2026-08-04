@@ -25,12 +25,14 @@ from pico.skills.models import Skill, Parameter, CodeBlock
 from pico.skills.exceptions import SkillValidationError
 
 
-def parse_skill_file(file_path: str) -> Skill:
+def parse_skill_file(file_path: str, base_dir: str = None) -> Skill:
     """
     解析技能文件并返回 Skill 对象
 
     参数:
         file_path: 技能文件路径（如 ".pico/skills/hello.md"）
+        base_dir: 技能文件所在目录（用于解析辅助脚本的相对路径）。
+                  如果未提供，则使用 file_path 的父目录。
 
     返回:
         Skill: 解析后的技能对象
@@ -40,6 +42,8 @@ def parse_skill_file(file_path: str) -> Skill:
 
     示例:
         skill = parse_skill_file(".pico/skills/hello.md")
+        # 或指定 base_dir
+        skill = parse_skill_file(".pico/skills/code-review/skill.md", ".pico/skills/code-review")
     """
 
     # frontmatter.load() 返回一个 Post 对象
@@ -61,6 +65,10 @@ def parse_skill_file(file_path: str) -> Skill:
     # 检测内容类型
     content_type = detect_content_type(content, code_blocks)
 
+    # 如果未提供 base_dir，使用 file_path 的父目录
+    if base_dir is None:
+        base_dir = str(Path(file_path).parent)
+
     skill = Skill(
         name=metadata["name"],
         description=metadata["description"],
@@ -70,6 +78,7 @@ def parse_skill_file(file_path: str) -> Skill:
         content_type=content_type,
         code_blocks=code_blocks,
         file_path=str(file_path),
+        base_dir=base_dir,
     )
 
     return skill
