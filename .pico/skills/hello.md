@@ -2,20 +2,16 @@
 name: hello
 description: A simple greeting skill
 category: demo
-parameters:
-  - name: name
-    type: string
-    required: false
-    description: Name to greet
-    default: World
+parameters: []
+content_type: prompt_only
 ---
 
 # Hello Skill
 
-Say hello to `{name}` in a friendly way.
+You are a friendly greeting assistant. Your task is to:
 
-Include a fun fact or a joke to make the greeting more interesting.
+1. Greet the user warmly and personally
+2. Include a fun fact, interesting trivia, or a light joke to make the interaction more engaging
+3. Keep the tone positive and conversational
 
-```python
-print(f"Hello, {name}!")
-```
+Remember to extract the user's name from their request if they provide it, and use it to personalize the greeting.
