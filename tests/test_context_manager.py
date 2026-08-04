@@ -33,7 +33,8 @@ def test_context_manager_assembles_sections_in_expected_order(tmp_path):
     assert prompt.index("Relevant memory:") < prompt.index("Transcript:")
     assert prompt.index("Transcript:") < prompt.index("Current user request:")
     assert prompt.rstrip().endswith("Current user request:\nWhere is the deploy key?")
-    assert metadata["section_order"] == ["prefix", "memory", "relevant_memory", "history", "current_request"]
+    # section_order 现在包含 skills（在 prefix 之后，memory 之前）
+    assert metadata["section_order"] == ["prefix", "skills", "memory", "relevant_memory", "history", "current_request"]
 
 # 测试点：
 #   - 超预算时，先裁剪 relevant_memory，再裁剪 history
@@ -89,6 +90,7 @@ def test_context_manager_renders_top_three_episodic_notes_per_note_under_budget(
         total_budget=250,
         section_budgets={
             "prefix": 60,
+            "skills": 0,  # 测试中没有技能，设置小预算
             "memory": 60,
             "relevant_memory": 80,
             "history": 60,

@@ -23,10 +23,22 @@ from .run_store import RunStore
 from .task_state import TaskState
 from . import tools as toolkit
 from .workspace import IGNORED_PATH_NAMES, MAX_HISTORY, WorkspaceContext, clip, now
+from .skills.loader import load_skills
+from .skills.inventory import SkillsInventory
+from .skills.executor import SkillExecutor
+from .skills.permissions import SkillPermissions
 
 SENSITIVE_ENV_NAME_MARKERS = ("API_KEY", "TOKEN", "SECRET", "PASSWORD")
 REDACTED_VALUE = "<redacted>"
-DEFAULT_SHELL_ENV_ALLOWLIST = ("HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "PATH", "PWD", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "USER")
+# Unix 和 Windows 通用的环境变量允许列表
+# Windows 特有的变量（SYSTEMROOT, WINDIR, APPDATA 等）对 Python 初始化至关重要
+DEFAULT_SHELL_ENV_ALLOWLIST = (
+    # Unix 变量
+    "HOME", "LANG", "LC_ALL", "LC_CTYPE", "LOGNAME", "PATH", "PWD", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "USER",
+    # Windows 变量（Python 初始化需要）
+    "SYSTEMROOT", "WINDIR", "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "COMMONPROGRAMFILES",
+    "COMSPEC", "OS", "PATHEXT", "USERNAME", "USERPROFILE", "ALLUSERSPROFILE", "PROGRAMDATA",
+)
 DEFAULT_FEATURE_FLAGS = {
     "memory": True,
     "relevant_memory": True,
@@ -184,6 +196,17 @@ class Pico:
         )
         self.session["memory"] = self.memory.to_dict()  # 让self.session的memory字段和self.memory字段地址相同
         self.tools = self.build_tools()
+
+        # 加载技能清单
+        skills_dir = self.root / ".pico" / "skills"
+        skills = load_skills(str(skills_dir))
+        self.skills_inventory = SkillsInventory(skills)
+
+        # 初始化技能执行器和权限管理器
+        permissions_file = self.root / ".pico" / "skill_permissions.json"
+        self.skill_permissions = SkillPermissions(str(permissions_file))
+        self.skill_executor = SkillExecutor(permissions=self.skill_permissions)
+
         self.prefix_state = self.build_prefix()
         self.prefix = self.prefix_state.text
         self.context_manager = ContextManager(self)
@@ -936,6 +959,110 @@ class Pico:
         self.last_durable_rejections = rejections
         self.last_durable_superseded = superseded
         return promoted, rejections, superseded
+
+    def invoke_skill(self, skill_name: str, parameters: dict = None, user_request: str = ""):
+        """
+        调用技能
+
+        参数:
+            skill_name: 技能名称
+            parameters: 参数字典
+            user_request: 用户的额外请求（可选）
+
+        返回:
+            str: AI 的回复 + 代码输出（如果有）
+
+        异常:
+            SkillNotFoundError: 技能不存在
+            SkillExecutionError: 执行失败
+            SkillPermissionDeniedError: 权限被拒绝
+        """
+        from .skills.exceptions import SkillNotFoundError, SkillExecutionError, SkillPermissionDeniedError
+
+        # 在技能清单中查找技能
+        skill = None
+        for s in self.skills_inventory.skills:
+            if s.name == skill_name:
+                skill = s
+                break
+
+        if skill is None:
+            # 技能不存在，尝试建议相似的技能
+            similar = [s.name for s in self.skills_inventory.skills if skill_name.lower() in s.name.lower()]
+            if similar:
+                raise SkillNotFoundError(
+                    f"Skill '{skill_name}' not found. Did you mean: {', '.join(similar)}?"
+                )
+            else:
+                raise SkillNotFoundError(
+                    f"Skill '{skill_name}' not found. Available skills: {', '.join(s.name for s in self.skills_inventory.skills)}"
+                )
+
+        # 定义权限提示函数（在终端中提示用户）
+        def prompt_permission(name):
+            print(f"\n[Skill Permission] Skill '{name}' requires permission to execute.")
+            print("Options: [a]llow once, [A]lways allow, [d]eny")
+            try:
+                choice = input("> ").strip()
+                if choice in ("a", "allow"):
+                    return "allow"
+                elif choice in ("A", "always"):
+                    return "always"
+                elif choice in ("d", "deny"):
+                    return "deny"
+                else:
+                    return "deny"
+            except (EOFError, KeyboardInterrupt):
+                return "deny"
+
+        # 执行技能（不传递参数，让 AI 自己从用户请求中提取信息）
+        try:
+            result = self.skill_executor.execute(
+                skill,
+                parameters={},  # 不传递参数
+                prompt_fn=prompt_permission
+            )
+        except Exception as e:
+            raise SkillExecutionError(f"Failed to execute skill '{skill_name}': {e}")
+
+        if not result.success:
+            if "Permission denied" in result.error_message:
+                raise SkillPermissionDeniedError(result.error_message)
+            raise SkillExecutionError(result.error_message)
+
+        # 如果有 prompt_injection，将其作为指令注入到对话中
+        if result.prompt_injection:
+            # 组合：skill 指令 + 用户请求
+            combined_message = result.prompt_injection
+            if user_request:
+                combined_message += f"\n\nUser request: {user_request}"
+
+            # 调用 ask() 让 AI 根据 skill 指令处理用户请求
+            ai_response = self.ask(combined_message)
+
+            # 构建返回文本：AI 回复 + 代码输出（如果有）
+            output_parts = [ai_response]
+            if result.code_output:
+                output_parts.append(f"\n[Code Output]\n{result.code_output}")
+
+            return "\n".join(output_parts)
+        else:
+            # 如果没有 prompt_injection，只返回代码输出
+            if result.code_output:
+                return f"[Skill: {skill_name}]\n{result.code_output}"
+            else:
+                return f"[Skill: {skill_name}] executed successfully."
+
+    def reload_skills(self) -> dict:
+        """
+        重新加载技能清单
+
+        返回:
+            dict: 包含 added, removed, updated 三个列表
+        """
+        skills_dir = self.root / ".pico" / "skills"
+        result = self.skills_inventory.reload(str(skills_dir))
+        return result
 
     def ask(self, user_message):
         """执行一次完整的 agent 回合，直到产出最终答案或命中停止条件。

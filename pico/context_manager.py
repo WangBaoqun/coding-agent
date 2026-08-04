@@ -13,19 +13,22 @@ from dataclasses import dataclass
 DEFAULT_TOTAL_BUDGET = 12000
 DEFAULT_SECTION_BUDGETS = {
     "prefix": 3600,
+    "skills": 600,  # 技能清单预算（约 5% 总预算）
     "memory": 1600,
     "relevant_memory": 1200,
     "history": 5200,
 }
 DEFAULT_SECTION_FLOORS = {
     "prefix": 1200,
+    "skills": 200,  # 技能清单最小预算
     "memory": 400,
     "relevant_memory": 300,
     "history": 1500,
 }
 # 当 prompt 超预算时，会优先压缩这些 section。
-DEFAULT_REDUCTION_ORDER = ("relevant_memory", "history", "memory", "prefix")
-SECTION_ORDER = ("prefix", "memory", "relevant_memory", "history", "current_request")
+# skills 是便利功能，优先级：系统规则 > 工具 > 记忆 > 历史 > 技能 > 相关记忆
+DEFAULT_REDUCTION_ORDER = ("relevant_memory", "skills", "history", "memory", "prefix")
+SECTION_ORDER = ("prefix", "skills", "memory", "relevant_memory", "history", "current_request")
 CURRENT_REQUEST_SECTION = "current_request"
 RELEVANT_MEMORY_LIMIT = 3
 
@@ -107,6 +110,7 @@ class ContextManager:
             context_reduction_enabled = self.agent.feature_enabled("context_reduction")
         section_texts = {
             "prefix": str(getattr(self.agent, "prefix", "")),
+            "skills": self._render_skills_section(),  # 渲染技能清单
             "memory": "Memory:\n- disabled" if not memory_enabled else str(self.agent.memory_text()),  # prompt中的memory内容在这里渲染，注意不包括relevant_memory
             "history": "",
             CURRENT_REQUEST_SECTION: f"Current user request:\n{user_message}",
@@ -181,6 +185,18 @@ class ContextManager:
         )
         return prompt, metadata
 
+    def _render_skills_section(self):
+        """渲染技能清单 section。
+
+        从 agent 获取 skills_inventory 并生成清单文本。
+        如果没有技能或 agent 没有 skills_inventory，返回空字符串。
+        """
+        inventory = getattr(self.agent, "skills_inventory", None)
+        if inventory is None:
+            return ""
+        # 调用 inventory 的 render() 方法生成清单文本
+        return str(inventory.render() or "").strip()
+
     def _render_sections_without_reduction(self, section_texts, selected_notes=None):
         selected_notes = selected_notes or []
         relevant_lines = ["Relevant memory:"]
@@ -191,8 +207,10 @@ class ContextManager:
         relevant_raw = "\n".join(relevant_lines)
         history = list(getattr(self.agent, "session", {}).get("history", []))
         history_raw = self._raw_history_text(history)
+        skills_raw = section_texts.get("skills", "")
         return {
             "prefix": SectionRender(raw=section_texts["prefix"], budget=len(section_texts["prefix"]), rendered=section_texts["prefix"], details={}),
+            "skills": SectionRender(raw=skills_raw, budget=len(skills_raw), rendered=skills_raw, details={}),
             "memory": SectionRender(raw=section_texts["memory"], budget=len(section_texts["memory"]), rendered=section_texts["memory"], details={}),
             "relevant_memory": SectionRender(
                 raw=relevant_raw,
@@ -235,6 +253,7 @@ class ContextManager:
             elif section == "history":
                 rendered[section] = self._render_history_section(int(budget or 0))
             else:
+                # prefix, skills, memory 作为普通 section 处理
                 raw = section_texts[section]
                 rendered_text = _tail_clip(raw, int(budget)) if budget is not None else raw
                 rendered[section] = SectionRender(raw=raw, budget=int(budget) if budget is not None else 0, rendered=rendered_text, details={})
@@ -445,10 +464,12 @@ class ContextManager:
         return [f"[{item['role']}] {_tail_clip(item['content'], line_limit)}"]
 
     def _assemble_prompt(self, rendered):
-        # 顺序是刻意设计的：稳定规则放前面，最新请求放最后。
+        # 顺序是刻意设计的：稳定规则放前面，技能清单紧跟其后，最新请求放最后。
+        # skills 清单放在 prefix 之后，因为它是便利功能，不如系统规则重要。
         return "\n\n".join(
             [
                 rendered["prefix"].rendered,
+                rendered["skills"].rendered,
                 rendered["memory"].rendered,
                 rendered["relevant_memory"].rendered,
                 rendered["history"].rendered,
@@ -458,7 +479,7 @@ class ContextManager:
 
     def _metadata(self, prompt, rendered, budgets, reduction_log, selected_notes, user_message, section_texts):
         section_metadata = {}
-        for section in SECTION_ORDER[:-1]:
+        for section in SECTION_ORDER[:-1]:  # 不包括 current_request
             section_metadata[section] = {
                 "raw_chars": rendered[section].raw_chars,
                 "budget_chars": int(budgets.get(section, 0)),
@@ -481,6 +502,11 @@ class ContextManager:
             "sections": section_metadata,
             "budget_reductions": reduction_log,
             "reduction_order": list(self.reduction_order),
+            "skills": {
+                "raw_chars": rendered["skills"].raw_chars,
+                "rendered_chars": rendered["skills"].rendered_chars,
+                "skills_count": self._count_skills(),
+            },
             "relevant_memory": {
                 "limit": RELEVANT_MEMORY_LIMIT,
                 "selected_count": len(selected_notes),
@@ -510,3 +536,13 @@ class ContextManager:
                 "section_chars": len(rendered[CURRENT_REQUEST_SECTION].rendered),
             },
         }
+
+    def _count_skills(self):
+        """统计技能清单中的技能数量。
+
+        从 agent 的 skills_inventory 获取技能数量。
+        """
+        inventory = getattr(self.agent, "skills_inventory", None)
+        if inventory is None:
+            return 0
+        return len(getattr(inventory, "skills", []))

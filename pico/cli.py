@@ -48,8 +48,46 @@ HELP_DETAILS = textwrap.dedent(
     /session Show the path to the saved session file.
     /reset   Clear the current session history and memory.
     /exit    Exit the agent.
+    /skill:name [args...]  Invoke a skill with optional arguments.
     """
 ).strip()
+
+
+def parse_skill_command(user_input: str):
+    """
+    解析技能调用命令
+
+    参数:
+        user_input: 用户输入，格式为 "/skill:name arg1 arg2"
+
+    返回:
+        tuple: (skill_name, arguments_dict) 或 None（如果不是技能命令）
+
+    示例:
+        >>> parse_skill_command("/skill:hello World")
+        ("hello", {"arg": "World"})
+        >>> parse_skill_command("/skill:code-review file.py")
+        ("code-review", {"arg": "file.py"})
+    """
+    import re
+
+    # 匹配 /skill:name 或 /skill:name args...
+    # 技能名支持字母、数字、下划线和连字符（如 code-review）
+    match = re.match(r"^/skill:([\w-]+)\s*(.*)?$", user_input.strip())
+    if not match:
+        return None
+
+    skill_name = match.group(1)
+    args_text = match.group(2).strip() if match.group(2) else ""
+
+    # 解析参数（简单的空格分隔，未来可以支持更复杂的格式）
+    arguments = {}
+    if args_text:
+        # 目前使用简单的 "arg" 键来存储所有参数
+        # 未来可以扩展为支持命名参数，如 /skill:name param1=value1 param2=value2
+        arguments["arg"] = args_text
+
+    return (skill_name, arguments)
 
 
 DEFAULT_OLLAMA_MODEL = "qwen3.5:4b"
@@ -329,6 +367,27 @@ def main(argv=None):
         if user_input == "/reset":
             agent.reset()
             print("session reset")
+            continue
+
+        # 检查是否是技能调用命令
+        skill_command = parse_skill_command(user_input)
+        if skill_command:
+            skill_name, arguments = skill_command
+
+            # 特殊处理 /skill:reload 命令
+            if skill_name == "reload":
+                result = agent.reload_skills()
+                print(f"Skills reloaded: {len(result['added'])} added, {len(result['removed'])} removed, {len(result['updated'])} updated")
+                continue
+
+            try:
+                # 提取用户请求（如果有）
+                user_request = arguments.get("arg", "")
+                result = agent.invoke_skill(skill_name, arguments, user_request=user_request)
+                if result:
+                    print(result)
+            except Exception as exc:
+                print(f"Error invoking skill '{skill_name}': {exc}", file=sys.stderr)
             continue
 
         print()
